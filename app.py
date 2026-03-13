@@ -3,13 +3,14 @@ import os
 import numpy as np
 import pickle
 from PIL import Image
+import gdown   
 
 # Suppress TensorFlow warnings and info messages
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 import tensorflow as tf
-from tensorflow.keras.models import load_model  # type: ignore
-from tensorflow.keras.preprocessing import image  # type: ignore
+from tensorflow.keras.models import load_model
+from tensorflow.keras.preprocessing import image
 
 from werkzeug.utils import secure_filename
 import io
@@ -24,7 +25,7 @@ app = Flask(__name__)
 # Configuration
 UPLOAD_FOLDER = 'uploads'
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'bmp', 'tif', 'tiff'}
-MAX_FILE_SIZE = 16 * 1024 * 1024  # 16MB
+MAX_FILE_SIZE = 16 * 1024 * 1024
 IMG_SIZE = (224, 224)
 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
@@ -37,6 +38,24 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 RESNET_MODEL_PATH = 'resnet152_cervical_cancer.keras'
 VGG_MODEL_PATH = 'vgg16_cervical_cancer.keras'
 ENSEMBLE_CONFIG_PATH = 'ensemble_config.pkl'
+
+# AUTO DOWNLOAD MODELS
+
+if not os.path.exists(RESNET_MODEL_PATH):
+    print("Downloading ResNet152 model from Google Drive...")
+    gdown.download(
+        "https://drive.google.com/uc?id=1QbqJeqeUQk35W_d7oiGNFWN35HiNHAUg",
+        RESNET_MODEL_PATH,
+        quiet=False
+    )
+
+if not os.path.exists(VGG_MODEL_PATH):
+    print("Downloading VGG16 model from Google Drive...")
+    gdown.download(
+        "https://drive.google.com/uc?id=1Wf8F0CtgJWt2SiiaZTuxcoCNU0WM5oIe",
+        VGG_MODEL_PATH,
+        quiet=False
+    )
 
 # Class information with descriptions
 CLASS_INFO = {
@@ -96,12 +115,11 @@ class WeightedEnsembleModel:
         predictions = self.predict(x)
         return np.argmax(predictions, axis=1)
 
-# Global variables for models
+# Global variables
 ensemble_model = None
 config = None
 
 def load_ensemble():
-    """Load ensemble model and configuration"""
     global ensemble_model, config
     
     try:
@@ -120,11 +138,9 @@ def load_ensemble():
         return False
 
 def allowed_file(filename):
-    """Check if file extension is allowed"""
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 def preprocess_image(img_path):
-    """Preprocess image for model prediction"""
     img = Image.open(img_path).convert('RGB')
     img = img.resize(IMG_SIZE)
     img_array = image.img_to_array(img)
@@ -133,21 +149,18 @@ def preprocess_image(img_path):
     return img_array
 
 def get_prediction_details(predictions, class_indices):
-    """Get detailed prediction information"""
     class_names = list(class_indices.keys())
     pred_probs = predictions[0]
-    
-    # Get top prediction
+
     top_idx = np.argmax(pred_probs)
     top_class = class_names[top_idx]
     top_confidence = float(pred_probs[top_idx]) * 100
-    
-    # Get all predictions sorted by confidence
+
     all_predictions = []
     for idx, prob in enumerate(pred_probs):
         class_name = class_names[idx]
         confidence = float(prob) * 100
-        
+
         all_predictions.append({
             'class': class_name,
             'class_display': CLASS_INFO[class_name]['name'],
@@ -156,10 +169,9 @@ def get_prediction_details(predictions, class_indices):
             'risk': CLASS_INFO[class_name]['risk'],
             'color': CLASS_INFO[class_name]['color']
         })
-    
-    # Sort by confidence
+
     all_predictions.sort(key=lambda x: x['confidence'], reverse=True)
-    
+
     return {
         'predicted_class': top_class,
         'predicted_class_display': CLASS_INFO[top_class]['name'],
@@ -172,62 +184,55 @@ def get_prediction_details(predictions, class_indices):
 
 @app.route('/')
 def index():
-    """Home page"""
     return render_template('index.html')
 
 @app.route('/about')
 def about():
-    """About page"""
     return render_template('about.html', class_info=CLASS_INFO)
 
 @app.route('/predict', methods=['POST'])
 def predict():
-    """Handle image upload and prediction"""
+
     if ensemble_model is None:
-        return jsonify({'error': 'Model not loaded. Please restart the server.'}), 500
-    
+        return jsonify({'error': 'Model not loaded'}), 500
+
     if 'file' not in request.files:
         return jsonify({'error': 'No file provided'}), 400
-    
+
     file = request.files['file']
-    
+
     if file.filename == '':
         return jsonify({'error': 'No file selected'}), 400
-    
+
     if not allowed_file(file.filename):
-        return jsonify({'error': f'Invalid file type. Allowed: {", ".join(ALLOWED_EXTENSIONS)}'}), 400
-    
+        return jsonify({'error': 'Invalid file type'}), 400
+
     try:
-        # Save file
+
         filename = secure_filename(file.filename)
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
-        
-        # Preprocess and predict
+
         img_array = preprocess_image(filepath)
         predictions = ensemble_model.predict(img_array)
-        
-        # Get detailed results
+
         result = get_prediction_details(predictions, config['class_indices'])
-        
-        # Convert image to base64 for display
+
         with open(filepath, 'rb') as img_file:
             img_data = base64.b64encode(img_file.read()).decode('utf-8')
-        
+
         result['image_data'] = f"data:image/jpeg;base64,{img_data}"
         result['filename'] = filename
-        
-        # Clean up uploaded file
+
         os.remove(filepath)
-        
+
         return jsonify(result)
-    
+
     except Exception as e:
-        return jsonify({'error': f'Prediction error: {str(e)}'}), 500
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/health')
 def health():
-    """Health check endpoint"""
     status = {
         'status': 'healthy' if ensemble_model is not None else 'unhealthy',
         'models_loaded': ensemble_model is not None,
@@ -236,19 +241,18 @@ def health():
     return jsonify(status)
 
 if __name__ == '__main__':
+
     print("="*80)
     print("CERVICAL CANCER CELL CLASSIFICATION - FLASK APPLICATION")
     print("="*80)
-    
-    # Load models on startup
+
     if load_ensemble():
+
         print("\n🚀 Starting Flask server...")
-        print("📍 Access the application at: http://localhost:5000")
-        print("="*80)
+        print("📍 http://localhost:5000")
+
         app.run(debug=True, host='0.0.0.0', port=5000)
+
     else:
-        print("\n❌ Failed to load models. Please ensure model files exist:")
-        print(f"   - {RESNET_MODEL_PATH}")
-        print(f"   - {VGG_MODEL_PATH}")
-        print(f"   - {ENSEMBLE_CONFIG_PATH}")
-        print("="*80)
+
+        print("❌ Failed to load models")
