@@ -3,7 +3,8 @@ import os
 import numpy as np
 import pickle
 from PIL import Image
-import gdown   
+import gdown
+import zipfile
 
 # Suppress TensorFlow warnings and info messages
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
@@ -39,23 +40,36 @@ RESNET_MODEL_PATH = 'resnet152_cervical_cancer.keras'
 VGG_MODEL_PATH = 'vgg16_cervical_cancer.keras'
 ENSEMBLE_CONFIG_PATH = 'ensemble_config.pkl'
 
-# AUTO DOWNLOAD MODELS
+# AUTO DOWNLOAD MODELS (ZIP METHOD)
 
-if not os.path.exists(RESNET_MODEL_PATH):
-    print("Downloading ResNet152 model from Google Drive...")
+MODEL_ZIP = "models.zip"
+
+# ✅ FIXED GOOGLE DRIVE LINK
+MODEL_ZIP_URL = "https://drive.google.com/uc?id=13BWsXV5JTi492BOp5kQncKn7MFy-lwmr"
+
+if not os.path.exists(RESNET_MODEL_PATH) or not os.path.exists(VGG_MODEL_PATH):
+
+    print("Downloading models zip from Google Drive...")
+
     gdown.download(
-        "https://drive.google.com/uc?id=1QbqJeqeUQk35W_d7oiGNFWN35HiNHAUg",
-        RESNET_MODEL_PATH,
+        MODEL_ZIP_URL,
+        MODEL_ZIP,
         quiet=False
     )
 
-if not os.path.exists(VGG_MODEL_PATH):
-    print("Downloading VGG16 model from Google Drive...")
-    gdown.download(
-        "https://drive.google.com/uc?id=1Wf8F0CtgJWt2SiiaZTuxcoCNU0WM5oIe",
-        VGG_MODEL_PATH,
-        quiet=False
-    )
+    print("Extracting models...")
+
+    with zipfile.ZipFile(MODEL_ZIP, 'r') as zip_ref:
+        zip_ref.extractall(".")
+
+# Move files if they are inside "models" folder
+if os.path.exists("models/resnet152_cervical_cancer.keras"):
+    os.rename("models/resnet152_cervical_cancer.keras", RESNET_MODEL_PATH)
+
+if os.path.exists("models/vgg16_cervical_cancer.keras"):
+    os.rename("models/vgg16_cervical_cancer.keras", VGG_MODEL_PATH)
+
+print("Models extracted successfully!")
 
 # Class information with descriptions
 CLASS_INFO = {
@@ -92,7 +106,6 @@ CLASS_INFO = {
 }
 
 class WeightedEnsembleModel:
-    """Ensemble model for predictions"""
     def __init__(self, model_paths, weights):
         self.models = []
         self.weights = weights
@@ -101,7 +114,7 @@ class WeightedEnsembleModel:
         for path in model_paths:
             model = load_model(path)
             self.models.append(model)
-            print(f"✓ Loaded: {path}")
+            print(f"Loaded: {path}")
     
     def predict(self, x):
         predictions = []
@@ -115,7 +128,6 @@ class WeightedEnsembleModel:
         predictions = self.predict(x)
         return np.argmax(predictions, axis=1)
 
-# Global variables
 ensemble_model = None
 config = None
 
@@ -131,10 +143,10 @@ def load_ensemble():
             weights=config['weights']
         )
         
-        print("✅ Ensemble model loaded successfully!")
+        print("Ensemble model loaded successfully!")
         return True
     except Exception as e:
-        print(f"❌ Error loading models: {str(e)}")
+        print(f"Error loading models: {str(e)}")
         return False
 
 def allowed_file(filename):
@@ -246,13 +258,7 @@ if __name__ == '__main__':
     print("CERVICAL CANCER CELL CLASSIFICATION - FLASK APPLICATION")
     print("="*80)
 
-    if load_ensemble():
+    load_ensemble()
 
-        print("\n🚀 Starting Flask server...")
-        print("📍 http://localhost:5000")
-
-        app.run(debug=True, host='0.0.0.0', port=5000)
-
-    else:
-
-        print("❌ Failed to load models")
+    print("\nStarting Flask server...")
+    app.run(host='0.0.0.0', port=7860)
